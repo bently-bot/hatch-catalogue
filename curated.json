@@ -397,7 +397,9 @@
         "zlib1g",
         "libegl-mesa0",
         "libglx-mesa0",
-        "libgles2"
+        "libgles2",
+        "libwayland-client0",
+        "libwayland-cursor0"
       ],
       "command": [
         "/opt/hatch/hdrview/app/AppRun"
