@@ -1,0 +1,44 @@
+name: Publish catalogue
+# On merge to main (and nightly, to pick up Debian DEP-11 changes): build, validate, sign, and publish
+# catalogue.json(.gz) + catalogue.json.sig + icons as assets of a new release marked "latest".
+# App URL: https://github.com/bently-bot/hatch-catalogue/releases/latest/download/catalogue.json.gz
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+concurrency: { group: publish, cancel-in-progress: false }
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install --quiet pyyaml
+      - run: python3 scripts/validate.py
+      - run: python3 scripts/build.py --cache /tmp/dep11 --out dist
+      - run: python3 scripts/validate.py dist/catalogue.json
+      - name: Skip if the apps are unchanged since the latest release
+        id: diff
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          if gh release download --repo "$GITHUB_REPOSITORY" --pattern catalogue.json --dir prev 2>/dev/null; then
+            same=$(python3 -c 'import json,sys; a=json.load(open("prev/catalogue.json")); b=json.load(open("dist/catalogue.json")); [x.pop("updated",None) for x in (a,b)]; print(int(a==b))')
+          else same=0; fi
+          echo "same=$same" >> "$GITHUB_OUTPUT"; echo "unchanged=$same"
+      - name: Sign (Ed25519)
+        if: steps.diff.outputs.same != '1'
+        env:
+          CATALOGUE_SIGNING_KEY: ${{ secrets.CATALOGUE_SIGNING_KEY }}
+        run: CATALOGUE_PUBKEY=$(cat signing-public-key.b64) scripts/sign.sh dist
+      - name: Release
+        if: steps.diff.outputs.same != '1'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          tag="catalogue-$(date -u +%Y%m%d-%H%M%S)"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --latest --title "$tag" \
+            --notes "$(python3 -c 'import json; c=json.load(open("dist/catalogue.json")); print(f"{len(c[\"apps\"])} apps, updated {c[\"updated\"]}, commit ${GITHUB_SHA::7}")')" \
+            dist/catalogue.json dist/catalogue.json.gz dist/catalogue.json.sig dist/icons/*.png

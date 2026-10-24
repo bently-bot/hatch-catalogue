@@ -1,0 +1,66 @@
+name: PR checks
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      apps: { description: "Ids to install+launch (default: changed vs main)", required: false }
+concurrency: { group: pr-${{ github.ref }}, cancel-in-progress: true }
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      changed: ${{ steps.changed.outputs.ids }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: python3 -m pip install --quiet pyyaml
+      - run: python3 scripts/validate.py
+      - run: python3 scripts/build.py --cache /tmp/dep11 --out dist
+      - run: python3 scripts/validate.py dist/catalogue.json
+      - id: changed
+        run: |
+          ids="${{ github.event.inputs.apps }}"
+          [ -n "$ids" ] || ids=$(python3 scripts/changed.py "origin/${{ github.base_ref || 'main' }}" HEAD)
+          echo "changed: $ids"; echo "ids=$ids" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist }
+
+  install-launch-proof:
+    # Each new/changed entry is installed and launched with Hatch's own guest scripts in a real Debian 13 arm64
+    # rootfs under proot, rendered by Hatch's compositor, and screenshotted (bently-bot/hatch harness).
+    needs: validate
+    if: needs.validate.outputs.changed != ''
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 75
+    steps:
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift 2>/dev/null || true
+      - uses: actions/checkout@v4
+        with:
+          repository: bently-bot/hatch
+          token: ${{ secrets.HATCH_REPO_TOKEN }}
+          path: hatch
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/rootfs.tar.xz
+          key: rootfs-${{ hashFiles('hatch/app/src/main/kotlin/dev/hatch/guest/RootfsCatalog.kt') }}
+      - name: Install + launch changed entries
+        env:
+          PROOF_DIR: ${{ github.workspace }}/proofs
+          APPS: ${{ needs.validate.outputs.changed }}
+        run: |
+          cp dist/catalogue.json hatch/catalogue/catalogue.json
+          cp dist/icons/*.png hatch/app/src/main/assets/icons/ 2>/dev/null || true
+          bash hatch/scripts/ci-guest-proof.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: install-launch-proofs
+          path: |
+            proofs/*.png
+            proofs/*.log
