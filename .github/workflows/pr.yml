@@ -3,8 +3,12 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      apps: { description: "Ids to install+launch (default: changed vs main)", required: false }
-concurrency: { group: pr-${{ github.ref }}, cancel-in-progress: true }
+      apps:
+        description: "Ids to install+launch (default: changed vs main)"
+        required: false
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   validate:
     runs-on: ubuntu-latest
