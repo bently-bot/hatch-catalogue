@@ -520,7 +520,8 @@
       },
       "controls": "doom",
       "screenshotsFrom": "io.github.fabiangreffrath.doom",
-      "license": "GPL-2.0+"
+      "license": "GPL-2.0+",
+      "x11": true
     }
   ]
 }
