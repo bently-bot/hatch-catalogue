@@ -35,6 +35,15 @@ def check_app(a, where):
             if not re.match(r"^[0-9a-f]{64}$", p.get("sha256", "")): err(i, f"payload {arch}: sha256 required (64 hex)")
             if not p.get("extractTo"): err(i, f"payload {arch}: extractTo required")
     if src == "debian" and not a.get("packages") and where == "curated": err(i, "debian entry needs packages")
+    # Optional verified downloads (hatch ≥ 0.2.0; older apps ignore them, so the entry must work without them).
+    for e in a.get("extras") or []:
+        if not str(e.get("url", "")).startswith("https://"): err(i, "extras: url must be https")
+        if not re.match(r"^[0-9a-f]{64}$", e.get("sha256", "")): err(i, "extras: sha256 required (64 hex)")
+        if not str(e.get("dest", "")).startswith("/opt/hatch/"): err(i, "extras: dest must be under /opt/hatch/ (removed on uninstall)")
+    imp = a.get("import")
+    if imp is not None:
+        if not imp.get("label") or not str(imp.get("dest", "")).startswith("/opt/hatch/"): err(i, "import needs a label and a dest under /opt/hatch/")
+    if a.get("controls") not in (None, "", "doom"): err(i, f"unknown controls preset {a.get('controls')!r}")
 
 def png_ok(path):
     b = open(path, "rb").read(32)
