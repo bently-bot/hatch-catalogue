@@ -13,15 +13,37 @@ ap.add_argument("--root", default=os.path.join(os.path.dirname(__file__), ".."))
 ap.add_argument("--out", default="dist")
 a = ap.parse_args()
 ROOT = os.path.abspath(a.root)
-BASE = "https://deb.debian.org/debian/dists/trixie/main/dep11"
+# appstream.debian.org's own copy of the DEP-11 data is regenerated together with its media, so its screenshot/icon
+# URLs resolve; the archive mirror's dep11/ can lag behind by months and point at media hashes that are long gone
+# (every screenshot 404'd in Hatch 0.1.0). The mirror is only a fallback when appstream.debian.org is down.
+SOURCES = ["https://appstream.debian.org/data/trixie/main", "https://deb.debian.org/debian/dists/trixie/main/dep11"]
 MEDIA = "https://appstream.debian.org/media/trixie/"
+THUMB = 752   # Hatch shows ~300×200 dp shots; 752 px is sharp on a Fold and ~5× smaller than the originals
 os.makedirs(a.cache, exist_ok=True)
 
 def fetch(name):
     p = os.path.join(a.cache, name)
     if not os.path.exists(p):
-        urllib.request.urlretrieve(f"{BASE}/{name}", p)
+        err = None
+        for base in SOURCES:
+            try:
+                req = urllib.request.Request(f"{base}/{name}", headers={"User-Agent": "hatch-catalogue-build"})
+                with urllib.request.urlopen(req, timeout=120) as r, open(p + ".part", "wb") as f: shutil.copyfileobj(r, f)
+                os.replace(p + ".part", p); print(f"{name} from {base}"); break
+            except Exception as e:
+                err = e; print(f"warning: {base}/{name}: {e}")
+        else:
+            raise SystemExit(f"can't fetch {name}: {err}")
     return p
+
+def shot_url(s):
+    """Thumbnail closest to THUMB px wide; the original when only small thumbs exist and it isn't huge."""
+    th = [t for t in s.get("thumbnails") or [] if t.get("url")]
+    src = s.get("source-image") or {}
+    best = min(th, key=lambda t: abs(t.get("width", 0) - THUMB), default=None)
+    if src.get("url") and (best is None or (best.get("width", 0) < 600 and 0 < src.get("width", 0) <= 1600)):
+        return src["url"]
+    return best["url"] if best else None
 
 CATS = [  # (our id, name, freedesktop main categories in priority order)
     ("office", "Office", ["Office"]), ("graphics", "Graphics", ["Graphics"]),
@@ -48,7 +70,9 @@ def plain(htmltext, n=700):
     return (t[:n].rsplit(" ", 1)[0] + "…") if len(t) > n else t
 
 docs = yaml.load_all(gzip.open(fetch(f"Components-{a.arch}.yml.gz"), "rt"), Loader=yaml.CSafeLoader)
-next(docs)
+header = next(docs)
+if header.get("MediaBaseUrl"): MEDIA = header["MediaBaseUrl"].rstrip("/") + "/"
+print(f"DEP-11 {header.get('Origin')} generated {header.get('Time')}")
 comps = []
 for d in docs:
     if d.get("Type") != "desktop-application": continue
@@ -75,8 +99,7 @@ for d in comps:
     if cached: icon_names[aid] = cached[0]["name"]
     shots = []
     for s in d.get("Screenshots") or []:
-        th = sorted(s.get("thumbnails") or [], key=lambda t: -t.get("width", 0))
-        url = (th[0]["url"] if th else (s.get("source-image") or {}).get("url"))
+        url = shot_url(s)
         if url: shots.append(MEDIA + url)
     apps[aid] = {
         "id": aid, "name": text(d, "Name"), "summary": text(d, "Summary"), "description": plain(text(d, "Description")),
@@ -87,7 +110,14 @@ for d in comps:
     }
 
 # Curated entries override/extend generated ones (keep their tested commands & flags).
+# "standalone": a curated app of its own (e.g. DOOM = crispy-doom + Freedoom) that must not absorb the generated entry
+# for its first package; "screenshotsFrom": borrow another entry's DEP-11 screenshots (and category/licence if unset).
 for cid, c in cur_by_id.items():
+    c = dict(c); standalone = c.pop("standalone", False); src = c.pop("screenshotsFrom", None)
+    if src and src in apps:
+        for k in ("screenshots", "category", "license"):
+            if not c.get(k) and apps[src].get(k): c[k] = apps[src][k]
+    if standalone: apps[cid] = c; continue
     base = apps.get(cid) or next((x for x in apps.values() if c.get("packages") and x.get("packages") == c["packages"][:1]), None) or {}
     merged = {**base, **{k: v for k, v in c.items() if v not in (None, "", [])}}
     if base and "desktopId" in base and c.get("command"): merged["command"] = c["command"]
