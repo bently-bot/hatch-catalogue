@@ -500,6 +500,7 @@
       "command": [
         "env",
         "DOOMWADPATH=/opt/hatch/doom:/usr/share/games/doom",
+        "SDL_VIDEODRIVER=x11",
         "crispy-doom",
         "-window"
       ],
