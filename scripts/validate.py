@@ -20,8 +20,14 @@ def check_app(a, where):
     if cmd is not None and (not isinstance(cmd, list) or not all(isinstance(c, str) and c for c in cmd)): err(i, f"{where}: command must be a list of strings")
     if src == "vendor":
         r = a.get("repo") or {}
-        for k in ("id", "keyUrl", "uris", "suites"):
-            if not r.get(k): err(i, f"vendor entry needs repo.{k}")
+        # Either the vendor's signed apt repo, or (Experimental only) a vendor client fetched by a Hatch guest script
+        # that verifies the vendor's own checksums (e.g. hatch-steam: Valve's manifest sha256s).
+        script_client = not r and a.get("experimental") is True and (cmd or [""])[0].startswith("hatch-")
+        if not script_client:
+            for k in ("id", "keyUrl", "uris", "suites"):
+                if not r.get(k): err(i, f"vendor entry needs repo.{k}")
+        ar = a.get("arches", [])
+        if not isinstance(ar, list) or any(x not in ("arm64", "amd64") for x in ar): err(i, "arches must be a list of arm64/amd64")
         if r.get("keyUrl") and not r["keyUrl"].startswith("https://"): err(i, "repo.keyUrl must be https")
         if not a.get("packages"): err(i, "vendor entry needs packages")
     if src == "flathub":
