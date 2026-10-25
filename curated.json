@@ -602,21 +602,6 @@
       ]
     },
     {
-      "id": "vlc",
-      "name": "VLC",
-      "source": "debian",
-      "packages": [
-        "vlc"
-      ],
-      "x11": true,
-      "command": [
-        "env",
-        "QT_QPA_PLATFORM=xcb",
-        "hatch-desktop",
-        "vlc.desktop"
-      ]
-    },
-    {
       "id": "thonny",
       "name": "Thonny",
       "source": "debian",
