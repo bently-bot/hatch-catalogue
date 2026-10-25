@@ -1,6 +1,7 @@
 name: Publish catalogue
-# On merge to main (and nightly, to pick up Debian DEP-11 changes): build, validate, sign, and publish
-# catalogue.json(.gz) + catalogue.json.sig + icons as assets of a new release marked "latest".
+# On merge to main (and nightly, to pick up Debian DEP-11 changes): build, validate, check every screenshot/icon URL,
+# sign, and publish catalogue.json(.gz) + catalogue.json.sig + icons + mirrored featured screenshots ("shot-<id>-<n>.*")
+# as assets of a new release marked "latest".
 # App URL: https://github.com/bently-bot/hatch-catalogue/releases/latest/download/catalogue.json.gz
 on:
   push:
@@ -20,6 +21,8 @@ jobs:
       - run: python3 -m pip install --quiet pyyaml
       - run: python3 scripts/validate.py
       - run: python3 scripts/build.py --cache /tmp/dep11 --out dist
+      - name: Screenshots and icons load (drops dead ones, mirrors featured shots; refuses to publish above 3% broken)
+        run: python3 scripts/check_media.py dist
       - run: python3 scripts/validate.py dist/catalogue.json
       - name: Skip if the apps are unchanged since the latest release
         id: diff
@@ -41,4 +44,4 @@ jobs:
           tag="catalogue-$(date -u +%Y%m%d-%H%M%S)"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --latest --title "$tag" \
             --notes "$(python3 -c 'import json; c=json.load(open("dist/catalogue.json")); print(f"{len(c[\"apps\"])} apps, updated {c[\"updated\"]}, commit ${GITHUB_SHA::7}")')" \
-            dist/catalogue.json dist/catalogue.json.gz dist/catalogue.json.sig dist/icons/*.png
+            dist/catalogue.json dist/catalogue.json.gz dist/catalogue.json.sig dist/icons/*.png $(ls dist/shots/* 2>/dev/null)
